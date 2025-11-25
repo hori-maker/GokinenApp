@@ -1,10 +1,10 @@
-// Firebaseの便利な機能をインターネットから読み込みます
+// Firebaseの機能を読み込み
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ▼▼▼ あなたの鍵の設定（ここを書き換えてください！） ▼▼▼
-const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyAw0esiXUv6TfvkYa3ag4Uo2HNV9A3srNY",
     authDomain: "gokinen-app.firebaseapp.com",
     projectId: "gokinen-app",
@@ -15,69 +15,97 @@ const firebaseConfig = {
 
 // ▲▲▲ 書き換えここまで ▲▲▲
 
-// アプリを起動する準備
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-let currentUser = null; // ログインしているユーザー情報
-let gokinenItems = []; // データを一時的に入れておく場所
+let currentUser = null;
+let gokinenItems = [];
 
-// ■ 1. ログイン状態を監視する（アプリが開いた瞬間に動く）
+// ■ 1. ログイン監視
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        // ログインしている時
         currentUser = user;
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('appContent').style.display = 'block';
-        
-        // データの同期を開始！
         startSync(user.uid);
+        initSortable(); // 並び替え機能ON
     } else {
-        // ログアウトしている時
         currentUser = null;
         document.getElementById('loginSection').style.display = 'block';
         document.getElementById('appContent').style.display = 'none';
     }
 });
 
-// ■ 2. ログイン・ログアウトボタンの設定
+// ■ 2. ボタン設定
 document.getElementById('loginBtn').addEventListener('click', () => {
     signInWithPopup(auth, provider).catch((error) => alert("ログイン失敗: " + error.message));
 });
-
 document.getElementById('logoutBtn').addEventListener('click', () => {
     signOut(auth);
 });
 
-// ■ 3. データをリアルタイム同期する魔法（onSnapshot）
+// ■ 3. データ同期（並び替え対応版）
 function startSync(userId) {
-    // ユーザーごとの箱（コレクション）を指定
-    // 並び順：作成日(createdAt)の昇順(asc)＝新しいのが下に来る
+    // データを作成日順に取得
     const q = query(
         collection(db, "users", userId, "items"), 
         orderBy("createdAt", "asc")
     );
 
-    // データベースに変更があるたびに、ここが勝手に動く！
     onSnapshot(q, (snapshot) => {
         gokinenItems = [];
         snapshot.forEach((doc) => {
+            const data = doc.data();
             gokinenItems.push({
-                id: doc.id, // FirestoreのID
-                ...doc.data() // 中身（text, isFulfilledなど）
+                id: doc.id,
+                ...data,
+                // 並び順がない場合は、作成日(数値)を代用する
+                order: data.order ?? (data.createdAt ? data.createdAt.toMillis() : 0)
             });
         });
-        renderList(); // 画面を更新
+
+        // ここで「order」の数字が小さい順に並び替える
+        gokinenItems.sort((a, b) => a.order - b.order);
+
+        renderList();
     });
 }
 
-// ■ 4. 追加ボタンの設定
+// ■ 4. 並び替え機能（SortableJS）
+function initSortable() {
+    const activeList = document.getElementById('activeList');
+    
+    new Sortable(activeList, {
+        handle: '.drag-handle', // つまむ場所
+        animation: 150,
+        ghostClass: 'sortable-ghost',
+        
+        // 並び替えが終わった時
+        onEnd: async function () {
+            // 1. 画面上のIDの順番を取得
+            const itemElements = activeList.querySelectorAll('li');
+            const newOrderIds = Array.from(itemElements).map(el => el.getAttribute('data-id'));
+
+            // 2. まとめて更新の準備（Batch）
+            const batch = writeBatch(db);
+
+            // 3. 未達成リストの順番を更新（0, 1, 2...と番号を振り直す）
+            newOrderIds.forEach((id, index) => {
+                const ref = doc(db, "users", currentUser.uid, "items", id);
+                batch.update(ref, { order: index });
+            });
+
+            // 4. Firebaseに送信
+            await batch.commit();
+        }
+    });
+}
+
+// ■ 5. 追加機能
 const input = document.getElementById('gokinenInput');
 document.getElementById('addBtn').addEventListener('click', addItem);
-
-// Enterキー設定
 input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.isComposing && !event.shiftKey) {
         event.preventDefault();
@@ -85,30 +113,41 @@ input.addEventListener('keydown', (event) => {
     }
 });
 
-// 追加する関数（Firestoreに保存）
 async function addItem() {
     const rawText = input.value;
     if (rawText.trim() === "") return;
 
     const lines = rawText.split(/\n/);
     
+    // 現在の一番大きいorder値を取得（一番下に追加するため）
+    const maxOrder = gokinenItems.length > 0 
+        ? Math.max(...gokinenItems.map(i => i.order)) 
+        : 0;
+
+    let currentOrder = maxOrder + 1; // 続きの番号からスタート
+
     // まとめて処理
+    const batch = writeBatch(db); // 一括追加用
+
     for (const line of lines) {
         const text = line.trim();
         if (text !== "") {
-            // ★ Cloud Firestoreに保存！
-            await addDoc(collection(db, "users", currentUser.uid, "items"), {
+            const newDocRef = doc(collection(db, "users", currentUser.uid, "items"));
+            batch.set(newDocRef, {
                 text: text,
                 isFulfilled: false,
                 fulfilledDate: null,
-                createdAt: serverTimestamp() // サーバーの時間を使う
+                createdAt: serverTimestamp(),
+                order: Date.now() + currentOrder // 大きな数字にして一番下にする
             });
+            currentOrder++;
         }
     }
+    await batch.commit(); // 送信
     input.value = '';
 }
 
-// ■ 5. 叶ったボタン（Firestoreを更新）
+// ■ 6. 叶った・削除
 window.fulfillItem = async (id) => {
     const item = gokinenItems.find(i => i.id === id);
     if (!item) return;
@@ -116,7 +155,6 @@ window.fulfillItem = async (id) => {
     const now = new Date();
     const dateStr = now.getFullYear() + "/" + (now.getMonth() + 1) + "/" + now.getDate();
 
-    // ★ Firestoreを更新！
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
     await updateDoc(itemRef, {
         isFulfilled: true,
@@ -125,15 +163,13 @@ window.fulfillItem = async (id) => {
     alert("おめでとうございます！記録しました。");
 };
 
-// ■ 6. 削除ボタン（Firestoreから削除）
 window.deleteItem = async (id) => {
     if(confirm("本当に削除してよろしいですか？")) {
-        // ★ Firestoreから削除！
         await deleteDoc(doc(db, "users", currentUser.uid, "items", id));
     }
 };
 
-// ■ 7. 画面を描画する（今までとほぼ同じ）
+// ■ 7. 描画
 function renderList() {
     const activeList = document.getElementById('activeList');
     const fulfilledList = document.getElementById('fulfilledList');
@@ -142,10 +178,13 @@ function renderList() {
 
     gokinenItems.forEach(item => {
         const li = document.createElement('li');
-        
+        li.setAttribute('data-id', item.id); // 並び替え用にIDを埋め込む
+
         if (!item.isFulfilled) {
             li.innerHTML = `
                 <div style="display:flex; align-items:center; width:100%;">
+                    <!-- ▼ ここにつまむマークを追加しました -->
+                    <span class="drag-handle">≡</span>
                     <span style="flex:1; margin-left:5px; white-space: pre-wrap;">${item.text}</span>
                 </div>
                 <div style="display:flex; flex-shrink:0;">
