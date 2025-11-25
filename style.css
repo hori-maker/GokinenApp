@@ -174,3 +174,25 @@ li {
     margin-bottom: 10px;
     padding: 5px;
 }
+/* カテゴリーヘッダーの調整 */
+.category-header {
+    cursor: grab; /* つかめるカーソルにする */
+    position: relative; /* 削除ボタンの配置用 */
+}
+.category-header:active {
+    cursor: grabbing;
+}
+
+/* カテゴリー削除ボタン */
+.btn-cat-delete {
+    background-color: transparent;
+    border: none;
+    color: #999;
+    font-size: 1.2rem;
+    cursor: pointer;
+    margin-left: 10px;
+    padding: 0 5px;
+}
+.btn-cat-delete:hover {
+    color: #dc3545; /* 赤くする */
+}
