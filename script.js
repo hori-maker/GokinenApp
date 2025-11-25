@@ -4,7 +4,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChang
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ▼▼▼ あなたの鍵の設定（ここを書き換えてください！） ▼▼▼
-  const firebaseConfig = {
+const firebaseConfig = {
     apiKey: "AIzaSyAw0esiXUv6TfvkYa3ag4Uo2HNV9A3srNY",
     authDomain: "gokinen-app.firebaseapp.com",
     projectId: "gokinen-app",
