@@ -103,3 +103,38 @@ li {
     opacity: 0.4;
     background-color: #e9ecef;
 }
+
+/* --- 編集機能用のスタイル --- */
+
+/* 編集ボタン（黄色っぽい色） */
+.btn-edit {
+    background-color: #ffc107;
+    color: #333; /* 文字は見やすく黒 */
+    margin-left: 5px;
+}
+.btn-edit:hover { background-color: #e0a800; }
+
+/* 保存ボタン（青） */
+.btn-save {
+    background-color: #007bff;
+    color: white;
+    margin-left: 5px;
+}
+
+/* キャンセルボタン（グレー） */
+.btn-cancel {
+    background-color: #6c757d;
+    color: white;
+    margin-left: 5px;
+}
+
+/* 編集中の入力欄 */
+.edit-input {
+    width: 100%;
+    padding: 8px;
+    font-size: 16px;
+    border: 2px solid #007bff; /* 編集中だとわかるように青枠 */
+    border-radius: 4px;
+    resize: none;
+    font-family: inherit;
+}
