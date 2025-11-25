@@ -138,3 +138,15 @@ li {
     resize: none;
     font-family: inherit;
 }
+
+/* カテゴリーラベルの基本デザイン */
+.cat-badge {
+    font-size: 0.75rem;
+    padding: 3px 6px;
+    border-radius: 4px;
+    margin-right: 8px;
+    font-weight: bold;
+    white-space: nowrap;
+    color: #333; /* 文字は黒っぽく統一 */
+    background-color: #e2e3e5; /* デフォルト色 */
+}

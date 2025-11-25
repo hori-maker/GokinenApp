@@ -26,8 +26,17 @@
                 <button id="logoutBtn" style="background:#666; font-size:0.8rem; padding:5px 10px;">ログアウト</button>
             </div>
             
-            <!-- 入力エリア -->
+           <!-- 入力エリア -->
             <div class="input-area">
+                <!-- ▼▼▼ カテゴリー選択と作成ボタン ▼▼▼ -->
+                <div style="display:flex; align-items:center; margin-right:5px;">
+                    <select id="categorySelect" style="padding:5px; border-radius:4px; border:1px solid #ccc;">
+                        <!-- 中身はJSで自動で作るので空っぽにしておく -->
+                    </select>
+                    <button id="addCatBtn" style="background:#28a745; margin-left:2px; padding:5px 8px;">＋</button>
+                </div>
+                <!-- ▲▲▲ ここまで ▲▲▲ -->
+
                 <textarea id="gokinenInput" placeholder="新しいご祈念項目を入力..." rows="1"></textarea>
                 <button id="addBtn">追加</button>
             </div>

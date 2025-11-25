@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ▼▼▼ あなたの鍵の設定（書き換えてください！） ▼▼▼
   const firebaseConfig = {
@@ -20,6 +20,7 @@ const provider = new GoogleAuthProvider();
 
 let currentUser = null;
 let gokinenItems = [];
+let categories = []; // カテゴリーリスト
 
 // ■ 1. ログイン監視
 onAuthStateChanged(auth, (user) => {
@@ -27,7 +28,11 @@ onAuthStateChanged(auth, (user) => {
         currentUser = user;
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('appContent').style.display = 'block';
-        startSync(user.uid);
+        
+        // アイテムとカテゴリー両方の同期を開始
+        startSyncItems(user.uid);
+        startSyncCategories(user.uid);
+        
         initSortable();
     } else {
         currentUser = null;
@@ -44,10 +49,9 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
     signOut(auth);
 });
 
-// ■ 3. データ同期
-function startSync(userId) {
+// ■ 3-A. アイテム同期
+function startSyncItems(userId) {
     const q = query(collection(db, "users", userId, "items"), orderBy("createdAt", "asc"));
-
     onSnapshot(q, (snapshot) => {
         const newItems = [];
         snapshot.forEach((doc) => {
@@ -56,18 +60,90 @@ function startSync(userId) {
                 id: doc.id,
                 ...data,
                 order: data.order ?? (data.createdAt ? data.createdAt.toMillis() : 0),
-                // 編集中かどうかの状態は、既存のリストから引き継ぐ
                 isEditing: gokinenItems.find(i => i.id === doc.id)?.isEditing || false
             });
         });
-        
         newItems.sort((a, b) => a.order - b.order);
-        gokinenItems = newItems; // データを更新
+        gokinenItems = newItems;
         renderList();
     });
 }
 
-// ■ 4. 並び替え（SortableJS）
+// ■ 3-B. カテゴリー同期（新機能）
+function startSyncCategories(userId) {
+    const q = query(collection(db, "users", userId, "categories"), orderBy("createdAt", "asc"));
+    
+    onSnapshot(q, async (snapshot) => {
+        categories = [];
+        snapshot.forEach((doc) => {
+            categories.push(doc.data().name);
+        });
+
+        // もしカテゴリーが1つもなかったら、初期セットを作る
+        if (categories.length === 0) {
+            await createDefaultCategories(userId);
+        } else {
+            renderCategoryOptions(); // プルダウンを更新
+        }
+    });
+}
+
+// 初期カテゴリーを作る関数
+async function createDefaultCategories(userId) {
+    const defaults = ["総合", "健康", "仕事", "家庭", "広布", "経済"];
+    const batch = writeBatch(db);
+    defaults.forEach(name => {
+        const ref = doc(collection(db, "users", userId, "categories"));
+        batch.set(ref, { name: name, createdAt: serverTimestamp() });
+    });
+    await batch.commit();
+}
+
+// プルダウンの中身を作る関数
+function renderCategoryOptions() {
+    const select = document.getElementById('categorySelect');
+    select.innerHTML = ""; // 一旦空にする
+    categories.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat;
+        option.textContent = cat;
+        select.appendChild(option);
+    });
+}
+
+// ■ 4. カテゴリー追加ボタン
+document.getElementById('addCatBtn').addEventListener('click', async () => {
+    const newCat = prompt("新しいカテゴリー名を入力してください");
+    if (newCat && newCat.trim() !== "") {
+        // 重複チェック
+        if (categories.includes(newCat)) {
+            alert("そのカテゴリーは既にあります");
+            return;
+        }
+        await addDoc(collection(db, "users", currentUser.uid, "categories"), {
+            name: newCat.trim(),
+            createdAt: serverTimestamp()
+        });
+        // 追加したら自動でそのカテゴリーを選択状態にする
+        setTimeout(() => {
+            document.getElementById('categorySelect').value = newCat.trim();
+        }, 500);
+    }
+});
+
+// ■ 5. 名前から色を自動生成する関数（ハッシュ計算）
+function getColor(str) {
+    if (!str) return "#e2e3e5"; // なければグレー
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    // パステルカラーっぽい色を作る
+    const h = hash % 360;
+    return `hsl(${h}, 70%, 85%)`; // 色相(H)を変化させ、彩度・明度は固定
+}
+
+// ■ 6. 並び替え
 function initSortable() {
     const activeList = document.getElementById('activeList');
     new Sortable(activeList, {
@@ -87,8 +163,10 @@ function initSortable() {
     });
 }
 
-// ■ 5. 追加機能
+// ■ 7. アイテム追加
 const input = document.getElementById('gokinenInput');
+const categorySelect = document.getElementById('categorySelect');
+
 document.getElementById('addBtn').addEventListener('click', addItem);
 input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.isComposing && !event.shiftKey) {
@@ -99,17 +177,20 @@ input.addEventListener('keydown', (event) => {
 
 async function addItem() {
     const rawText = input.value;
+    const category = categorySelect.value || "総合";
     if (rawText.trim() === "") return;
+
     const lines = rawText.split(/\n/);
     const maxOrder = gokinenItems.length > 0 ? Math.max(...gokinenItems.map(i => i.order)) : 0;
     let currentOrder = maxOrder + 1;
     const batch = writeBatch(db);
+
     for (const line of lines) {
         const text = line.trim();
         if (text !== "") {
             const newDocRef = doc(collection(db, "users", currentUser.uid, "items"));
             batch.set(newDocRef, {
-                text: text, isFulfilled: false, fulfilledDate: null, createdAt: serverTimestamp(), order: Date.now() + currentOrder
+                text: text, category: category, isFulfilled: false, fulfilledDate: null, createdAt: serverTimestamp(), order: Date.now() + currentOrder
             });
             currentOrder++;
         }
@@ -118,7 +199,7 @@ async function addItem() {
     input.value = '';
 }
 
-// ■ 6. 叶った・削除・編集機能
+// ■ 8. 各種ボタン機能
 window.fulfillItem = async (id) => {
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
     const now = new Date();
@@ -126,49 +207,30 @@ window.fulfillItem = async (id) => {
     await updateDoc(itemRef, { isFulfilled: true, fulfilledDate: dateStr });
     alert("おめでとうございます！記録しました。");
 };
-
 window.deleteItem = async (id) => {
     if(confirm("本当に削除してよろしいですか？")) {
         await deleteDoc(doc(db, "users", currentUser.uid, "items", id));
     }
 };
-
-// --- ★ここから下が新機能（編集）です★ ---
-
-// 編集ボタンを押した時：入力モードにする
 window.startEdit = (id) => {
     const item = gokinenItems.find(i => i.id === id);
-    if(item) {
-        item.isEditing = true; // 編集中のフラグを立てる
-        renderList(); // 画面を書き直す（入力欄が現れる）
-    }
+    if(item) { item.isEditing = true; renderList(); }
 };
-
-// キャンセルボタンを押した時：元に戻す
 window.cancelEdit = (id) => {
     const item = gokinenItems.find(i => i.id === id);
-    if(item) {
-        item.isEditing = false;
-        renderList();
-    }
+    if(item) { item.isEditing = false; renderList(); }
 };
-
-// 保存ボタンを押した時：Firebaseを更新
 window.saveEdit = async (id) => {
     const inputVal = document.getElementById(`edit-input-${id}`).value.trim();
     if(inputVal === "") return alert("内容を入力してください");
-
-    // 画面上で一旦編集モードを終わらせる
     const item = gokinenItems.find(i => i.id === id);
     if(item) item.isEditing = false;
     renderList();
-
-    // Firebaseに送信
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
     await updateDoc(itemRef, { text: inputVal });
 };
 
-// ■ 7. 描画
+// ■ 9. 描画
 function renderList() {
     const activeList = document.getElementById('activeList');
     const fulfilledList = document.getElementById('fulfilledList');
@@ -179,10 +241,13 @@ function renderList() {
         const li = document.createElement('li');
         li.setAttribute('data-id', item.id);
 
+        const catName = item.category || "総合";
+        // ★名前から色を自動計算して背景色にする
+        const bgColor = getColor(catName);
+        const catBadge = `<span class="cat-badge" style="background-color:${bgColor}">${catName}</span>`;
+
         if (!item.isFulfilled) {
-            // --- 未達成リスト ---
             if (item.isEditing) {
-                // ★ 編集中の見た目（入力欄 + 保存 + キャンセル）
                 li.innerHTML = `
                     <div style="width:100%;">
                         <textarea id="edit-input-${item.id}" class="edit-input" rows="2">${item.text}</textarea>
@@ -193,10 +258,10 @@ function renderList() {
                     </div>
                 `;
             } else {
-                // ★ 通常の見た目（テキスト + 編集 + 叶 + 削）
                 li.innerHTML = `
                     <div style="display:flex; align-items:center; width:100%;">
                         <span class="drag-handle">≡</span>
+                        ${catBadge}
                         <span style="flex:1; margin-left:5px; white-space: pre-wrap;">${item.text}</span>
                     </div>
                     <div style="display:flex; flex-shrink:0;">
@@ -208,10 +273,10 @@ function renderList() {
             }
             activeList.appendChild(li);
         } else {
-            // --- 達成済みリスト（編集不可） ---
             li.classList.add('fulfilled-item');
             li.innerHTML = `
                 <div>
+                    ${catBadge}
                     <span style="white-space: pre-wrap;">${item.text}</span>
                     <span class="date-label">達成日: ${item.fulfilledDate}</span>
                 </div>
