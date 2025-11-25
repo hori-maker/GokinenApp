@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ▼▼▼ あなたの鍵の設定（書き換えてください！） ▼▼▼
   const firebaseConfig = {
@@ -30,7 +30,6 @@ onAuthStateChanged(auth, (user) => {
         document.getElementById('appContent').style.display = 'block';
         startSyncItems(user.uid);
         startSyncCategories(user.uid);
-        initSortable();
     } else {
         currentUser = null;
         document.getElementById('loginSection').style.display = 'block';
@@ -60,6 +59,7 @@ function startSyncItems(userId) {
                 isEditing: gokinenItems.find(i => i.id === doc.id)?.isEditing || false
             });
         });
+        // 全体をオーダー順に並べておく
         newItems.sort((a, b) => a.order - b.order);
         gokinenItems = newItems;
         renderList();
@@ -78,6 +78,7 @@ function startSyncCategories(userId) {
             await createDefaultCategories(userId);
         } else {
             renderCategoryOptions();
+            renderList(); // カテゴリーが増えたらリストも再描画
         }
     });
 }
@@ -131,23 +132,49 @@ function getColor(str) {
     return `hsl(${h}, 70%, 85%)`;
 }
 
-// ■ 5. 並び替え
+// ■ 5. 並び替え（カテゴリー間移動対応版）
 function initSortable() {
-    const activeList = document.getElementById('activeList');
-    new Sortable(activeList, {
-        handle: '.drag-handle',
-        animation: 150,
-        ghostClass: 'sortable-ghost',
-        onEnd: async function () {
-            const itemElements = activeList.querySelectorAll('li');
-            const newOrderIds = Array.from(itemElements).map(el => el.getAttribute('data-id'));
-            const batch = writeBatch(db);
-            newOrderIds.forEach((id, index) => {
-                const ref = doc(db, "users", currentUser.uid, "items", id);
-                batch.update(ref, { order: index });
-            });
-            await batch.commit();
-        }
+    // クラス名 .sortable-list がついている全てのリストに対してSortableを適用
+    const lists = document.querySelectorAll('.sortable-list');
+    
+    lists.forEach(list => {
+        new Sortable(list, {
+            group: 'shared', // ★重要：これをつけるとリスト間で移動できるようになる
+            handle: '.drag-handle',
+            animation: 150,
+            ghostClass: 'sortable-ghost',
+            
+            // ドラッグが終わった時の処理
+            onEnd: async function (evt) {
+                const itemEl = evt.item; // 動かした要素
+                const newList = evt.to; // 移動先のリスト（ul）
+                const itemId = itemEl.getAttribute('data-id');
+                
+                // 移動先のカテゴリー名を取得
+                const newCategory = newList.getAttribute('data-category');
+                
+                // そのリスト内の新しい並び順IDを取得
+                const newOrderIds = Array.from(newList.querySelectorAll('li')).map(el => el.getAttribute('data-id'));
+                
+                // 一括更新
+                const batch = writeBatch(db);
+                
+                // 1. 移動したアイテムのカテゴリーを更新
+                const itemRef = doc(db, "users", currentUser.uid, "items", itemId);
+                batch.update(itemRef, { category: newCategory });
+
+                // 2. 移動先のリスト内の順番を更新
+                newOrderIds.forEach((id, index) => {
+                    const ref = doc(db, "users", currentUser.uid, "items", id);
+                    batch.update(ref, { order: index });
+                });
+
+                // 3. もし元のリストと違うなら、元のリストの順番も整え直してもいいが、
+                // 今回は「order」はカテゴリー内での相対順序として扱うので、移動先だけ整えればOK
+                
+                await batch.commit();
+            }
+        });
     });
 }
 
@@ -169,8 +196,12 @@ async function addItem() {
     if (rawText.trim() === "") return;
 
     const lines = rawText.split(/\n/);
-    const maxOrder = gokinenItems.length > 0 ? Math.max(...gokinenItems.map(i => i.order)) : 0;
+    
+    // そのカテゴリー内での最大オーダーを探す
+    const sameCatItems = gokinenItems.filter(i => (i.category || "総合") === category);
+    const maxOrder = sameCatItems.length > 0 ? Math.max(...sameCatItems.map(i => i.order)) : 0;
     let currentOrder = maxOrder + 1;
+    
     const batch = writeBatch(db);
 
     for (const line of lines) {
@@ -210,91 +241,135 @@ window.cancelEdit = (id) => {
     if(item) { item.isEditing = false; renderList(); }
 };
 
-// ★保存時にカテゴリーも更新するように修正
 window.saveEdit = async (id) => {
     const inputVal = document.getElementById(`edit-input-${id}`).value.trim();
-    const catVal = document.getElementById(`edit-cat-${id}`).value; // カテゴリーの値も取得
-
+    const catVal = document.getElementById(`edit-cat-${id}`).value;
     if(inputVal === "") return alert("内容を入力してください");
 
-    // 画面更新
     const item = gokinenItems.find(i => i.id === id);
     if(item) item.isEditing = false;
     renderList();
 
-    // Firebase更新
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
-    await updateDoc(itemRef, { 
-        text: inputVal,
-        category: catVal // カテゴリーも更新
-    });
+    await updateDoc(itemRef, { text: inputVal, category: catVal });
 };
 
-// ■ 8. 描画
+// ■ 8. 描画（カテゴリー別分割表示）
 function renderList() {
-    const activeList = document.getElementById('activeList');
+    const container = document.getElementById('activeListContainer');
     const fulfilledList = document.getElementById('fulfilledList');
-    activeList.innerHTML = '';
+    
+    container.innerHTML = '';
     fulfilledList.innerHTML = '';
 
-    gokinenItems.forEach(item => {
-        const li = document.createElement('li');
-        li.setAttribute('data-id', item.id);
-
-        const catName = item.category || "総合";
-        const bgColor = getColor(catName);
-        const catBadge = `<span class="cat-badge" style="background-color:${bgColor}">${catName}</span>`;
-
-        if (!item.isFulfilled) {
-            if (item.isEditing) {
-                // ★編集モード：プルダウンを表示する処理を追加
-                let catOptions = "";
-                categories.forEach(c => {
-                    // 今設定されているカテゴリーを選択状態にする
-                    const selected = (c === catName) ? "selected" : "";
-                    catOptions += `<option value="${c}" ${selected}>${c}</option>`;
-                });
-
-                li.innerHTML = `
-                    <div style="width:100%;">
-                        <div style="margin-bottom:5px;">
-                            <select id="edit-cat-${item.id}" style="padding:5px; border-radius:4px; border:1px solid #ccc;">
-                                ${catOptions}
-                            </select>
-                        </div>
-                        <textarea id="edit-input-${item.id}" class="edit-input" rows="2">${item.text}</textarea>
-                        <div style="margin-top:5px; text-align:right;">
-                            <button class="btn-save" onclick="saveEdit('${item.id}')">保存</button>
-                            <button class="btn-cancel" onclick="cancelEdit('${item.id}')">キャンセル</button>
-                        </div>
-                    </div>
-                `;
-            } else {
-                li.innerHTML = `
-                    <div style="display:flex; align-items:center; width:100%;">
-                        <span class="drag-handle">≡</span>
-                        ${catBadge}
-                        <span style="flex:1; margin-left:5px; white-space: pre-wrap;">${item.text}</span>
-                    </div>
-                    <div style="display:flex; flex-shrink:0;">
-                        <button class="btn-edit" onclick="startEdit('${item.id}')">編</button>
-                        <button class="btn-fulfill" onclick="fulfillItem('${item.id}')">叶</button>
-                        <button class="btn-delete" onclick="deleteItem('${item.id}')">削</button>
-                    </div>
-                `;
-            }
-            activeList.appendChild(li);
-        } else {
-            li.classList.add('fulfilled-item');
-            li.innerHTML = `
-                <div>
-                    ${catBadge}
-                    <span style="white-space: pre-wrap;">${item.text}</span>
-                    <span class="date-label">達成日: ${item.fulfilledDate}</span>
-                </div>
-                <button class="btn-delete" onclick="deleteItem('${item.id}')">削</button>
-            `;
-            fulfilledList.insertBefore(li, fulfilledList.firstChild);
-        }
+    // ★カテゴリーごとに箱を作る
+    // "総合"など既存のカテゴリー + アイテムについてるけどリストにない未知のカテゴリーも網羅
+    const allCats = new Set([...categories, "総合"]);
+    gokinenItems.forEach(i => allCats.add(i.category || "総合"));
+    
+    // カテゴリーのリストを配列にしてソート（総合を先頭に）
+    const sortedCats = Array.from(allCats).sort((a, b) => {
+        if(a === "総合") return -1;
+        if(b === "総合") return 1;
+        return a.localeCompare(b);
     });
+
+    // 1. 未達成リストの描画
+    sortedCats.forEach(catName => {
+        // そのカテゴリーに属するアイテムを抽出
+        const itemsInCat = gokinenItems.filter(i => !i.isFulfilled && (i.category || "総合") === catName);
+        
+        // 色生成
+        const bgColor = getColor(catName);
+
+        // カテゴリーのヘッダー作成
+        const header = document.createElement('div');
+        header.className = 'category-header';
+        header.style.borderLeftColor = bgColor.replace('85%', '60%'); // 少し濃い色を枠線に
+        header.innerHTML = `<span>${catName}</span> <span style="font-size:0.8rem; color:#888;">${itemsInCat.length}件</span>`;
+        container.appendChild(header);
+
+        // カテゴリーごとのリスト（ul）作成
+        const ul = document.createElement('ul');
+        ul.className = 'list-group sortable-list';
+        ul.setAttribute('data-category', catName); // 移動したときにどのカテゴリーかわかるようにする
+
+        // アイテムを入れる
+        itemsInCat.forEach(item => {
+            const li = createLi(item);
+            ul.appendChild(li);
+        });
+
+        container.appendChild(ul);
+    });
+
+    // 2. 達成済みリストの描画（ここは今まで通り一括で、カテゴリーバッジを表示）
+    const fulfilledItems = gokinenItems.filter(i => i.isFulfilled);
+    // 達成日順（新しい順）に並べ替え
+    fulfilledItems.sort((a, b) => new Date(b.fulfilledDate) - new Date(a.fulfilledDate));
+
+    fulfilledItems.forEach(item => {
+        const li = document.createElement('li');
+        li.classList.add('fulfilled-item');
+        const catName = item.category || "総合";
+        const badge = `<span class="cat-badge" style="background-color:${getColor(catName)}">${catName}</span>`;
+        
+        li.innerHTML = `
+            <div>
+                ${badge}
+                <span style="white-space: pre-wrap;">${item.text}</span>
+                <span class="date-label">達成日: ${item.fulfilledDate}</span>
+            </div>
+            <button class="btn-delete" onclick="deleteItem('${item.id}')">削</button>
+        `;
+        fulfilledList.appendChild(li);
+    });
+
+    // Sortableを全リストに適用
+    initSortable();
+}
+
+// LI要素を作る関数（コードを見やすくするために分離）
+function createLi(item) {
+    const li = document.createElement('li');
+    li.setAttribute('data-id', item.id);
+    
+    // バッジはヘッダーがあるので、リスト内ではあえて表示しなくてもスッキリするかも？
+    // でも編集時のためにカテゴリー情報は持っておく
+    
+    if (item.isEditing) {
+        let catOptions = "";
+        categories.forEach(c => {
+            const selected = (c === (item.category || "総合")) ? "selected" : "";
+            catOptions += `<option value="${c}" ${selected}>${c}</option>`;
+        });
+
+        li.innerHTML = `
+            <div style="width:100%;">
+                <div style="margin-bottom:5px;">
+                    <select id="edit-cat-${item.id}" style="padding:5px; border-radius:4px; border:1px solid #ccc;">
+                        ${catOptions}
+                    </select>
+                </div>
+                <textarea id="edit-input-${item.id}" class="edit-input" rows="2">${item.text}</textarea>
+                <div style="margin-top:5px; text-align:right;">
+                    <button class="btn-save" onclick="saveEdit('${item.id}')">保存</button>
+                    <button class="btn-cancel" onclick="cancelEdit('${item.id}')">キャンセル</button>
+                </div>
+            </div>
+        `;
+    } else {
+        li.innerHTML = `
+            <div style="display:flex; align-items:center; width:100%;">
+                <span class="drag-handle">≡</span>
+                <span style="flex:1; margin-left:5px; white-space: pre-wrap;">${item.text}</span>
+            </div>
+            <div style="display:flex; flex-shrink:0;">
+                <button class="btn-edit" onclick="startEdit('${item.id}')">編</button>
+                <button class="btn-fulfill" onclick="fulfillItem('${item.id}')">叶</button>
+                <button class="btn-delete" onclick="deleteItem('${item.id}')">削</button>
+            </div>
+        `;
+    }
+    return li;
 }
