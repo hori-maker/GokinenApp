@@ -3,36 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ご祈念帳</title>
-    <!-- スマホでホーム画面に追加した時にアプリっぽく見せる設定 -->
+    <title>ご祈念帳 (クラウド同期版)</title>
+    <!-- スマホ用設定 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="stylesheet" href="style.css">
-    <!-- これを追加！ -->
+    <!-- 並び替えライブラリ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-    
-    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>ご祈念帳</h1>
-        
-        <!-- 入力エリア -->
-        <div class="input-area">
-            <!-- inputではなくtextareaに変更 -->
-　　　　　　　<textarea id="gokinenInput" placeholder="新しいご祈念項目を入力..." rows="1"></textarea>
-            <button onclick="addItem()">追加</button>
+        <!-- ▼▼▼ ここが新しく追加されたログインエリア ▼▼▼ -->
+        <div id="loginSection" style="text-align:center; margin-bottom:20px;">
+            <p>Googleアカウントでログインしてください</p>
+            <button id="loginBtn" style="background:#4285f4; width:100%;">Googleでログイン</button>
         </div>
+        
+        <!-- ▼▼▼ ここから下はログイン後に表示されます ▼▼▼ -->
+        <div id="appContent" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h1>ご祈念帳</h1>
+                <button id="logoutBtn" style="background:#666; font-size:0.8rem; padding:5px 10px;">ログアウト</button>
+            </div>
+            
+            <!-- 入力エリア -->
+            <div class="input-area">
+                <textarea id="gokinenInput" placeholder="新しいご祈念項目を入力..." rows="1"></textarea>
+                <button id="addBtn">追加</button>
+            </div>
 
-        <!-- 未達成（現在のご祈念）リスト -->
-        <h2>現在のご祈念</h2>
-        <ul id="activeList" class="list-group"></ul>
+            <!-- 未達成リスト -->
+            <h2>現在のご祈念</h2>
+            <ul id="activeList" class="list-group"></ul>
 
-        <!-- 達成（叶ったこと）リスト -->
-        <h2>叶ったご祈念（体験）</h2>
-        <ul id="fulfilledList" class="list-group fulfilled-area"></ul>
+            <!-- 達成リスト -->
+            <h2>叶ったご祈念（体験）</h2>
+            <ul id="fulfilledList" class="list-group fulfilled-area"></ul>
+        </div>
     </div>
 
-    <script src="script.js"></script>
+    <!-- ▼▼▼ 重要な変更：type="module" をつけました ▼▼▼ -->
+    <script type="module" src="script.js"></script>
 </body>
 </html>
