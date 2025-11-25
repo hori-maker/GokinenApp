@@ -20,7 +20,7 @@ const provider = new GoogleAuthProvider();
 
 let currentUser = null;
 let gokinenItems = [];
-let categories = []; // カテゴリーリスト
+let categories = []; 
 
 // ■ 1. ログイン監視
 onAuthStateChanged(auth, (user) => {
@@ -28,11 +28,8 @@ onAuthStateChanged(auth, (user) => {
         currentUser = user;
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('appContent').style.display = 'block';
-        
-        // アイテムとカテゴリー両方の同期を開始
         startSyncItems(user.uid);
         startSyncCategories(user.uid);
-        
         initSortable();
     } else {
         currentUser = null;
@@ -69,26 +66,22 @@ function startSyncItems(userId) {
     });
 }
 
-// ■ 3-B. カテゴリー同期（新機能）
+// ■ 3-B. カテゴリー同期
 function startSyncCategories(userId) {
     const q = query(collection(db, "users", userId, "categories"), orderBy("createdAt", "asc"));
-    
     onSnapshot(q, async (snapshot) => {
         categories = [];
         snapshot.forEach((doc) => {
             categories.push(doc.data().name);
         });
-
-        // もしカテゴリーが1つもなかったら、初期セットを作る
         if (categories.length === 0) {
             await createDefaultCategories(userId);
         } else {
-            renderCategoryOptions(); // プルダウンを更新
+            renderCategoryOptions();
         }
     });
 }
 
-// 初期カテゴリーを作る関数
 async function createDefaultCategories(userId) {
     const defaults = ["総合", "健康", "仕事", "家庭", "広布", "経済"];
     const batch = writeBatch(db);
@@ -99,10 +92,9 @@ async function createDefaultCategories(userId) {
     await batch.commit();
 }
 
-// プルダウンの中身を作る関数
 function renderCategoryOptions() {
     const select = document.getElementById('categorySelect');
-    select.innerHTML = ""; // 一旦空にする
+    select.innerHTML = "";
     categories.forEach(cat => {
         const option = document.createElement('option');
         option.value = cat;
@@ -111,11 +103,10 @@ function renderCategoryOptions() {
     });
 }
 
-// ■ 4. カテゴリー追加ボタン
+// ■ 4. カテゴリー追加
 document.getElementById('addCatBtn').addEventListener('click', async () => {
     const newCat = prompt("新しいカテゴリー名を入力してください");
     if (newCat && newCat.trim() !== "") {
-        // 重複チェック
         if (categories.includes(newCat)) {
             alert("そのカテゴリーは既にあります");
             return;
@@ -124,26 +115,23 @@ document.getElementById('addCatBtn').addEventListener('click', async () => {
             name: newCat.trim(),
             createdAt: serverTimestamp()
         });
-        // 追加したら自動でそのカテゴリーを選択状態にする
         setTimeout(() => {
             document.getElementById('categorySelect').value = newCat.trim();
         }, 500);
     }
 });
 
-// ■ 5. 名前から色を自動生成する関数（ハッシュ計算）
 function getColor(str) {
-    if (!str) return "#e2e3e5"; // なければグレー
+    if (!str) return "#e2e3e5";
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
-    // パステルカラーっぽい色を作る
     const h = hash % 360;
-    return `hsl(${h}, 70%, 85%)`; // 色相(H)を変化させ、彩度・明度は固定
+    return `hsl(${h}, 70%, 85%)`;
 }
 
-// ■ 6. 並び替え
+// ■ 5. 並び替え
 function initSortable() {
     const activeList = document.getElementById('activeList');
     new Sortable(activeList, {
@@ -163,7 +151,7 @@ function initSortable() {
     });
 }
 
-// ■ 7. アイテム追加
+// ■ 6. アイテム追加
 const input = document.getElementById('gokinenInput');
 const categorySelect = document.getElementById('categorySelect');
 
@@ -199,7 +187,7 @@ async function addItem() {
     input.value = '';
 }
 
-// ■ 8. 各種ボタン機能
+// ■ 7. 操作機能
 window.fulfillItem = async (id) => {
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
     const now = new Date();
@@ -212,6 +200,7 @@ window.deleteItem = async (id) => {
         await deleteDoc(doc(db, "users", currentUser.uid, "items", id));
     }
 };
+
 window.startEdit = (id) => {
     const item = gokinenItems.find(i => i.id === id);
     if(item) { item.isEditing = true; renderList(); }
@@ -220,17 +209,28 @@ window.cancelEdit = (id) => {
     const item = gokinenItems.find(i => i.id === id);
     if(item) { item.isEditing = false; renderList(); }
 };
+
+// ★保存時にカテゴリーも更新するように修正
 window.saveEdit = async (id) => {
     const inputVal = document.getElementById(`edit-input-${id}`).value.trim();
+    const catVal = document.getElementById(`edit-cat-${id}`).value; // カテゴリーの値も取得
+
     if(inputVal === "") return alert("内容を入力してください");
+
+    // 画面更新
     const item = gokinenItems.find(i => i.id === id);
     if(item) item.isEditing = false;
     renderList();
+
+    // Firebase更新
     const itemRef = doc(db, "users", currentUser.uid, "items", id);
-    await updateDoc(itemRef, { text: inputVal });
+    await updateDoc(itemRef, { 
+        text: inputVal,
+        category: catVal // カテゴリーも更新
+    });
 };
 
-// ■ 9. 描画
+// ■ 8. 描画
 function renderList() {
     const activeList = document.getElementById('activeList');
     const fulfilledList = document.getElementById('fulfilledList');
@@ -242,14 +242,26 @@ function renderList() {
         li.setAttribute('data-id', item.id);
 
         const catName = item.category || "総合";
-        // ★名前から色を自動計算して背景色にする
         const bgColor = getColor(catName);
         const catBadge = `<span class="cat-badge" style="background-color:${bgColor}">${catName}</span>`;
 
         if (!item.isFulfilled) {
             if (item.isEditing) {
+                // ★編集モード：プルダウンを表示する処理を追加
+                let catOptions = "";
+                categories.forEach(c => {
+                    // 今設定されているカテゴリーを選択状態にする
+                    const selected = (c === catName) ? "selected" : "";
+                    catOptions += `<option value="${c}" ${selected}>${c}</option>`;
+                });
+
                 li.innerHTML = `
                     <div style="width:100%;">
+                        <div style="margin-bottom:5px;">
+                            <select id="edit-cat-${item.id}" style="padding:5px; border-radius:4px; border:1px solid #ccc;">
+                                ${catOptions}
+                            </select>
+                        </div>
                         <textarea id="edit-input-${item.id}" class="edit-input" rows="2">${item.text}</textarea>
                         <div style="margin-top:5px; text-align:right;">
                             <button class="btn-save" onclick="saveEdit('${item.id}')">保存</button>
