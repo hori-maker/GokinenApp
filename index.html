@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ご祈念帳</title>
+    <!-- スマホでホーム画面に追加した時にアプリっぽく見せる設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="style.css">
+    <!-- これを追加！ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>ご祈念帳</h1>
+        
+        <!-- 入力エリア -->
+        <div class="input-area">
+            <input type="text" id="gokinenInput" placeholder="新しいご祈念項目を入力...">
+            <button onclick="addItem()">追加</button>
+        </div>
+
+        <!-- 未達成（現在のご祈念）リスト -->
+        <h2>現在のご祈念</h2>
+        <ul id="activeList" class="list-group"></ul>
+
+        <!-- 達成（叶ったこと）リスト -->
+        <h2>叶ったご祈念（体験）</h2>
+        <ul id="fulfilledList" class="list-group fulfilled-area"></ul>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
